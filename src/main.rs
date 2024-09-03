@@ -37,7 +37,7 @@ mod dummy_at_method {
     }
     impl Dummy for &serde_json::Value {
         fn at(&self, p: &str) -> Result<serde_json::Value, crate::AgError> {
-            self.get(p).cloned().ok_or_else(|| crate::AgError::AttributeError(p.to_owned()))
+            self.get(p).cloned().ok_or_else(|| crate::AgError::bad_request_error(format!("The JSON's property '{}' is not found", p)))
         }
     }
 }
@@ -75,14 +75,33 @@ fn log_stderr(msg: &str) {
 pub enum AgError {
     SerdeJsonError(serde_json::Error),
     UuidError(uuid::Error),
-    NotFoundError(String),
-    ForbiddenError(String),
-    TooManyRequestsError(&'static str),
+    // NotFoundError(String),
+    // ForbiddenError(String),
+    // TooManyRequestsError(&'static str),
     RmpEncodeError(rmp_serde::encode::Error),
     RmpDecodeError(rmp_serde::decode::Error),
-    BadRequestError(String),
-    UnauthorizedError(&'static str),
-    AttributeError(String)
+    // BadRequestError(String),
+    // UnauthorizedError(&'static str),
+    // AttributeError(String)
+    ErrorWithHttpStatus(axum::http::StatusCode, borrow::Cow<'static, str>),
+}
+
+impl AgError {
+    pub fn not_found_error(msg: impl Into<borrow::Cow<'static, str>>) -> Self {
+        Self::ErrorWithHttpStatus(axum::http::StatusCode::NOT_FOUND, msg.into())
+    }
+    pub fn too_many_requests_error(msg: impl Into<borrow::Cow<'static, str>>) -> Self {
+        Self::ErrorWithHttpStatus(axum::http::StatusCode::TOO_MANY_REQUESTS, msg.into())
+    }
+    pub fn forbidden_error(msg: impl Into<borrow::Cow<'static, str>>) -> Self {
+        Self::ErrorWithHttpStatus(axum::http::StatusCode::FORBIDDEN, msg.into())
+    }
+    pub fn bad_request_error(msg: impl Into<borrow::Cow<'static, str>>) -> Self {
+        Self::ErrorWithHttpStatus(axum::http::StatusCode::BAD_REQUEST, msg.into())
+    }
+    pub fn unauthorized_error(msg: impl Into<borrow::Cow<'static, str>>) -> Self {
+        Self::ErrorWithHttpStatus(axum::http::StatusCode::UNAUTHORIZED, msg.into())
+    }
 }
 
 impl From<serde_json::Error> for AgError {
@@ -175,56 +194,11 @@ fn gen_auth_handler(
             let req_body = axum::body::to_bytes(req_body, usize::MAX).await.unwrap();
             if let Err(e) = process(&req_meta, &req_body, &mut res, handle_json).await {
                 match e {
-                    AgError::ForbiddenError(msg) => {
-                        *res.status_mut() = axum::http::StatusCode::FORBIDDEN;
+                    AgError::ErrorWithHttpStatus(status, msg) => {
+                        *res.status_mut() = status;
                         *res.body_mut() = axum::body::Body::from(
                             rmp_serde::to_vec(&serde_json::json!({
-                                "error": msg
-                            }))
-                            .unwrap(),
-                        );
-                    }
-                    AgError::NotFoundError(msg) => {
-                        *res.status_mut() = axum::http::StatusCode::NOT_FOUND;
-                        *res.body_mut() = axum::body::Body::from(
-                            rmp_serde::to_vec(&serde_json::json!({
-                                "error": msg
-                            }))
-                            .unwrap(),
-                        );
-                    }
-                    AgError::TooManyRequestsError(msg) => {
-                        *res.status_mut() = axum::http::StatusCode::TOO_MANY_REQUESTS;
-                        *res.body_mut() = axum::body::Body::from(
-                            rmp_serde::to_vec(&serde_json::json!({
-                                "error": msg
-                            }))
-                            .unwrap(),
-                        );
-                    }
-                    AgError::BadRequestError(msg) => {
-                        *res.status_mut() = axum::http::StatusCode::BAD_REQUEST;
-                        *res.body_mut() = axum::body::Body::from(
-                            rmp_serde::to_vec(&serde_json::json!({
-                                "error": msg
-                            }))
-                            .unwrap(),
-                        );
-                    }
-                    AgError::AttributeError(name) => {
-                        *res.status_mut() = axum::http::StatusCode::BAD_REQUEST;
-                        *res.body_mut() = axum::body::Body::from(
-                            rmp_serde::to_vec(&serde_json::json!({
-                                "error": format!("'{}' is not found", name)
-                            }))
-                            .unwrap(),
-                        );
-                    }
-                    AgError::UnauthorizedError(msg) => {
-                        *res.status_mut() = axum::http::StatusCode::UNAUTHORIZED;
-                        *res.body_mut() = axum::body::Body::from(
-                            rmp_serde::to_vec(&serde_json::json!({
-                                "error": msg
+                                "error": msg.into_owned()
                             }))
                             .unwrap(),
                         );
@@ -351,7 +325,7 @@ async fn main() {
             let session = session_list.get(&uuid_from_json_value(req.at("session_id")?)?)?;
             let room = room_list.get_by_id(&session.room_id)?;
             if session.user_id != room.get_owner()?.id {
-                return Err(AgError::ForbiddenError(
+                return Err(AgError::forbidden_error(
                     "Only owner can start the game.".to_owned(),
                 ));
             }
@@ -370,7 +344,7 @@ async fn main() {
             if (time::Instant::now() - room.get_user(&session.user_id)?.get_last_time())
                 < time::Duration::from_millis(100)
             {
-                return Err(AgError::TooManyRequestsError(
+                return Err(AgError::too_many_requests_error(
                     "Wait 100ms before sending another sync request.",
                 ));
             }

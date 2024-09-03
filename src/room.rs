@@ -38,7 +38,7 @@ impl user_t {
     }
     pub fn set_name(&mut self, new_name: &str) -> Result<(), crate::AgError> {
         if new_name.is_empty() || new_name.len() > Self::NAME_MAX_LENGTH {
-            return Err(crate::AgError::BadRequestError(format!(
+            return Err(crate::AgError::bad_request_error(format!(
                 "Invalid user name length: {}. Must be between 1 and {}.",
                 new_name.len(),
                 Self::NAME_MAX_LENGTH
@@ -94,14 +94,14 @@ impl room_t {
         log_info: crate::Logger,
     ) -> Result<Self, crate::AgError> {
         if version.is_empty() || version.len() > Self::VERSION_MAX_LENGTH {
-            return Err(crate::AgError::BadRequestError(format!(
+            return Err(crate::AgError::bad_request_error(format!(
                 "Invalid room version length: {}. Must be between 1 and {}.",
                 version.len(),
                 Self::VERSION_MAX_LENGTH
             )));
         }
         if size < 2 || size > Self::SIZE_MAX {
-            return Err(crate::AgError::BadRequestError(format!(
+            return Err(crate::AgError::bad_request_error(format!(
                 "Invalid room size: {}. Must be between 2 and {}.",
                 size,
                 Self::SIZE_MAX
@@ -143,7 +143,7 @@ impl room_t {
 
     pub fn join(&self, version: String, user: user_t) -> Result<(), crate::AgError> {
         if version != self.version {
-            return Err(crate::AgError::BadRequestError(format!(
+            return Err(crate::AgError::bad_request_error(format!(
                 "Invalid room version: {}. This roon version is {}.",
                 version, self.version
             )));
@@ -155,18 +155,18 @@ impl room_t {
             ..
         } = &mut *self.inner.write();
         if !*in_lobby {
-            return Err(crate::AgError::ForbiddenError(
+            return Err(crate::AgError::forbidden_error(
                 "Game already started.".to_owned(),
             ));
         }
         if users.len() >= self.size {
-            return Err(crate::AgError::ForbiddenError(format!(
+            return Err(crate::AgError::forbidden_error(format!(
                 "Room is full. Max user count is {}.",
                 self.size
             )));
         }
         if users.contains_key(&user.id) {
-            return Err(crate::AgError::ForbiddenError(
+            return Err(crate::AgError::forbidden_error(
                 "User already in the room.".to_owned(),
             ));
         }
@@ -186,7 +186,7 @@ impl room_t {
         lock.users
             .get(id)
             .cloned()
-            .ok_or_else(|| crate::AgError::NotFoundError("User not found.".to_owned()))
+            .ok_or_else(|| crate::AgError::not_found_error("User not found.".to_owned()))
     }
 
     pub fn has_user(&self, id: &uuid::Uuid) -> bool {
@@ -232,7 +232,7 @@ impl room_t {
     pub fn get_owner(&self) -> Result<user_t, crate::AgError> {
         let lock = self.inner.read();
         if lock.users.is_empty() {
-            return Err(crate::AgError::NotFoundError("Room is empty.".to_owned()));
+            return Err(crate::AgError::not_found_error("Room is empty.".to_owned()));
         }
         return Ok(lock.users.first_key_value().unwrap().1.clone());
     }
@@ -245,12 +245,12 @@ impl room_t {
     pub fn start_game(&self) -> Result<(), crate::AgError> {
         let mut lock = self.inner.write();
         if !lock.in_lobby {
-            return Err(crate::AgError::ForbiddenError(
+            return Err(crate::AgError::forbidden_error(
                 "Game already started.".to_owned(),
             ));
         }
         if lock.users.len() < 2 {
-            return Err(crate::AgError::ForbiddenError(
+            return Err(crate::AgError::forbidden_error(
                 "Not enough players to start the game.".to_owned(),
             ));
         }
@@ -296,18 +296,18 @@ impl room_t {
         let mut lock = self.inner.write();
 
         if !lock.users.contains_key(&user_id) {
-            return Err(crate::AgError::ForbiddenError(
+            return Err(crate::AgError::forbidden_error(
                 "User not in the room.".to_owned(),
             ));
         }
         let record = lock.sync_records.last_key_value().unwrap().1.clone();
         if record.get_phase(user_id) > crate::phase_t::CREATED {
-            return Err(crate::AgError::ForbiddenError(
+            return Err(crate::AgError::forbidden_error(
                 "User already synced.".to_owned(),
             ));
         }
         if record.get_max_phase() >= crate::phase_t::SYNCED {
-            return Err(crate::AgError::ForbiddenError(
+            return Err(crate::AgError::forbidden_error(
                 "Room already synced.".to_owned(),
             ));
         }

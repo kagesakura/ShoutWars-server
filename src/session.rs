@@ -51,7 +51,7 @@ impl session_list_t {
         sessions
             .get(id)
             .cloned()
-            .ok_or_else(|| crate::AgError::UnauthorizedError("Session not found."))
+            .ok_or_else(|| crate::AgError::unauthorized_error("Session not found."))
     }
     pub fn exists(&self, id: &uuid::Uuid) -> bool {
         let sessions = self.sessions.read();

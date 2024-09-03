@@ -47,7 +47,7 @@ impl room_list_t {
     ) -> Result<sync::Arc<crate::room_t>, crate::AgError> {
         let mut lock = self.rooms_mutex.write();
         if lock.rooms.len() >= lock.limit {
-            return Err(crate::AgError::ForbiddenError(format!(
+            return Err(crate::AgError::forbidden_error(format!(
                 "Room limit reached. Max room count is {}.",
                 lock.limit
             )));
@@ -98,7 +98,7 @@ impl room_list_t {
         lock.rooms
             .get(id)
             .cloned()
-            .ok_or_else(|| crate::AgError::NotFoundError("Room not found.".to_owned()))
+            .ok_or_else(|| crate::AgError::not_found_error("Room not found.".to_owned()))
     }
 
     pub fn get(&self, name: &str) -> Result<sync::Arc<crate::room_t>, crate::AgError> {
@@ -107,7 +107,7 @@ impl room_list_t {
             .get(name)
             .and_then(|id| lock.rooms.get(id))
             .cloned()
-            .ok_or_else(|| crate::AgError::NotFoundError("Room not found.".to_owned()))
+            .ok_or_else(|| crate::AgError::not_found_error("Room not found.".to_owned()))
     }
 
     pub fn exists_by_id(&self, id: &uuid::Uuid) -> bool {
