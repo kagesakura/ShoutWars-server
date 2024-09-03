@@ -55,7 +55,7 @@ pub struct sync_record_t {
 
 impl sync_record_t {
     fn gen_id() -> uuid::Uuid {
-        todo!()
+        uuid::Uuid::now_v7()
     }
 
     pub fn new() -> Self {
@@ -67,33 +67,33 @@ impl sync_record_t {
 
     pub fn add_events(
         &self,
-        from: &uuid::Uuid,
+        from: uuid::Uuid,
         new_reports: &Vec<sync::Arc<event_t>>,
         new_actions: &Vec<sync::Arc<event_t>>,
     ) -> Result<(), crate::AgError> {
         let mut lock = self.inner.write();
-        if lock.users_phase[from] > phase_t::CREATED {
+        if *lock.users_phase.entry(from).or_insert(phase_t::CREATED) > phase_t::CREATED {
             return Err(crate::AgError::BadRequestError(
                 "Record already synced.".to_owned(),
             ));
         }
         for report in new_reports {
-            if &report.from != from {
+            if report.from != from {
                 return Err(crate::AgError::BadRequestError(
                     "Invalid report from.".to_owned(),
                 ));
             }
-            *lock.reports.get_mut(&report.id).unwrap() = report.clone();
+            lock.reports.insert(report.id, report.clone());
         }
         for action in new_actions {
-            if &action.from != from {
+            if action.from != from {
                 return Err(crate::AgError::BadRequestError(
                     "Invalid action from.".to_owned(),
                 ));
             }
-            *lock.actions.get_mut(&action.id).unwrap() = action.clone();
+            lock.reports.insert(action.id, action.clone());
         }
-        *lock.users_phase.get_mut(from).unwrap() = phase_t::WAITING;
+        lock.users_phase.insert(from, phase_t::WAITING);
         Ok(())
     }
 
@@ -112,12 +112,12 @@ impl sync_record_t {
         return *lock.users_phase.entry(user_id).or_insert(phase_t::CREATED);
     }
 
-    pub fn advance_phase(&self, user_id: &uuid::Uuid, new_phase: phase_t) -> bool {
+    pub fn advance_phase(&self, user_id: uuid::Uuid, new_phase: phase_t) -> bool {
         let mut lock = self.inner.write();
-        if new_phase <= lock.users_phase[user_id] {
+        if new_phase <= *lock.users_phase.entry(user_id).or_insert(phase_t::CREATED) {
             return false;
         }
-        *lock.users_phase.get_mut(user_id).unwrap() = new_phase;
+        lock.users_phase.insert(user_id, new_phase);
         return true;
     }
 

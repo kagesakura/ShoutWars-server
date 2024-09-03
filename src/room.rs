@@ -34,7 +34,7 @@ impl user_t {
         Ok(this)
     }
     pub fn get_name(&self) -> String {
-        todo!()
+        self.name.clone()
     }
     pub fn set_name(&mut self, new_name: &str) -> Result<(), crate::AgError> {
         if new_name.is_empty() || new_name.len() > Self::NAME_MAX_LENGTH {
@@ -109,13 +109,13 @@ impl room_t {
         }
         let mut inner = room_inner {
             expire_time: time::Instant::now() + lobby_lifetime,
-            users: collections::BTreeMap::from([(owner.id.clone(), owner)]),
+            users: collections::BTreeMap::from([(owner.id, owner)]),
             in_lobby: true,
             info: Default::default(),
             sync_records: Default::default(),
         };
         let record = sync::Arc::new(crate::sync_record_t::new());
-        inner.sync_records.insert(record.id.clone(), record);
+        inner.sync_records.insert(record.id, record);
         inner
             .users
             .first_entry()
@@ -170,11 +170,11 @@ impl room_t {
                 "User already in the room.".to_owned(),
             ));
         }
-        let user_id = user.id.clone();
+        let user_id = user.id;
         users.insert(user.id, user);
         let new_user = users.get_mut(&user_id).unwrap();
         new_user.update_last(if sync_records.len() > 1 {
-            sync_records.last_key_value().unwrap().0.clone()
+            *sync_records.last_key_value().unwrap().0
         } else {
             uuid::Uuid::nil()
         });
@@ -287,7 +287,7 @@ impl room_t {
 
     pub fn sync(
         &self,
-        user_id: &uuid::Uuid,
+        user_id: uuid::Uuid,
         reports: &Vec<sync::Arc<crate::event_t>>,
         actions: &Vec<sync::Arc<crate::event_t>>,
         wait_timeout: time::Duration, // default = time::Duration::from_millis(200)
@@ -295,13 +295,13 @@ impl room_t {
     ) -> Result<Vec<sync::Arc<crate::sync_record_t>>, crate::AgError> {
         let mut lock = self.inner.write();
 
-        if !lock.users.contains_key(user_id) {
+        if !lock.users.contains_key(&user_id) {
             return Err(crate::AgError::ForbiddenError(
                 "User not in the room.".to_owned(),
             ));
         }
         let record = lock.sync_records.last_key_value().unwrap().1.clone();
-        if record.get_phase(user_id.clone()) > crate::phase_t::CREATED {
+        if record.get_phase(user_id) > crate::phase_t::CREATED {
             return Err(crate::AgError::ForbiddenError(
                 "User already synced.".to_owned(),
             ));
@@ -312,7 +312,7 @@ impl room_t {
             ));
         }
 
-        record.add_events(&user_id, reports, actions)?;
+        record.add_events(user_id, reports, actions)?;
 
         // wait for users who didn't skip last sync
         if record.get_max_phase() <= crate::phase_t::WAITING && lock.sync_records.len() > 1 {
@@ -321,7 +321,7 @@ impl room_t {
                 .last_key_value()
                 .unwrap()
                 .1
-                .get_phase(user_id.clone())
+                .get_phase(user_id)
                 < crate::phase_t::SYNCED
             {
                 self.sync_cv.wait_while_for(&mut lock, wait_timeout, || {
@@ -329,30 +329,30 @@ impl room_t {
                 });
             }
         }
-        record.advance_phase(&user_id, crate::phase_t::SYNCING);
+        record.advance_phase(user_id, crate::phase_t::SYNCING);
         self.sync_cv.notify_all();
 
         // wait for all users to sync
         if lock
             .users
             .keys()
-            .any(|id| record.get_phase(id.clone()) <= crate::phase_t::CREATED)
+            .any(|id| record.get_phase(*id) <= crate::phase_t::CREATED)
         {
             self.sync_cv.wait_while_for(&mut lock, sync_timeout, || {
                 !(record.get_max_phase() > crate::phase_t::SYNCING)
             });
         }
-        record.advance_phase(&user_id, crate::phase_t::SYNCED);
+        record.advance_phase(user_id, crate::phase_t::SYNCED);
         self.sync_cv.notify_all();
 
-        let user = lock.users.get(user_id).unwrap();
+        let user = lock.users.get(&user_id).unwrap();
         let mut records = Vec::new();
         for (_, r) in lock.sync_records.range((
             ops::Bound::Excluded(user.get_last_sync_id()),
             ops::Bound::Unbounded,
         )) {
             records.push(r.clone());
-            r.advance_phase(&user_id, crate::phase_t::SYNCED);
+            r.advance_phase(user_id, crate::phase_t::SYNCED);
         }
         // if all users synced, create new record
         if lock.users.keys().cloned().any(|id| {
@@ -363,10 +363,10 @@ impl room_t {
         }) {
             let next_record = sync::Arc::new(crate::sync_record_t::new());
             lock.sync_records
-                .insert(next_record.id.clone(), next_record);
+                .insert(next_record.id, next_record);
         }
 
-        let user = lock.users.get_mut(user_id).unwrap();
+        let user = lock.users.get_mut(&user_id).unwrap();
         user.update_last(record.id);
         return Ok(records);
     }

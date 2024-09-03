@@ -16,7 +16,7 @@ impl session_t {
         }
     }
     fn gen_id() -> uuid::Uuid {
-        todo!()
+        uuid::Uuid::now_v7()
     }
 }
 
@@ -37,10 +37,10 @@ impl session_list_t {
     pub fn create(&self, room_id: uuid::Uuid, user_id: uuid::Uuid) -> session_t {
         let mut sessions = self.sessions.write();
         let session = session_t::new(room_id, user_id);
-        sessions.insert(session.id.clone(), session.clone());
+        sessions.insert(session.id, session.clone());
         (self.log_info)(&format!(
             "Session created: {} (room_id={}, user_id={})",
-            session.id.clone(),
+            session.id,
             room_id,
             user_id
         ));

@@ -84,8 +84,8 @@ impl room_list_t {
             self.log_error.clone(),
             self.log_info.clone(),
         )?);
-        *lock.rooms.get_mut(&room.id).unwrap() = room.clone();
-        *lock.name_to_id.get_mut(&name).unwrap() = room.id;
+        lock.rooms.insert(room.id, room.clone());
+        lock.name_to_id.insert(name.clone(), room.id);
         (self.log_info)(&format!(
             "Room created: {} (version={}, owner_id={}, name={}, size={})",
             room.id, version, owner_id, name, size

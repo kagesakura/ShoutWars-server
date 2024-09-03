@@ -28,12 +28,18 @@ fn stoul(v: String) -> u64 {
 
 mod dummy_at_method {
     pub trait Dummy {
-        fn at(&self, _: &str) -> serde_json::Value {
-            todo!();
+        fn at(&self, p: &str) -> Result<serde_json::Value, crate::AgError>;
+    }
+    impl Dummy for serde_json::Value {
+        fn at(&self, p: &str) -> Result<serde_json::Value, crate::AgError> {
+            <&serde_json::Value>::at(&self, p)
         }
     }
-    impl Dummy for serde_json::Value {}
-    impl Dummy for &serde_json::Value {}
+    impl Dummy for &serde_json::Value {
+        fn at(&self, p: &str) -> Result<serde_json::Value, crate::AgError> {
+            self.get(p).cloned().ok_or_else(|| crate::AgError::AttributeError(p.to_owned()))
+        }
+    }
 }
 use dummy_at_method::Dummy;
 
@@ -76,6 +82,7 @@ pub enum AgError {
     RmpDecodeError(rmp_serde::decode::Error),
     BadRequestError(String),
     UnauthorizedError(&'static str),
+    AttributeError(String)
 }
 
 impl From<serde_json::Error> for AgError {
@@ -149,22 +156,22 @@ fn gen_auth_handler(
             }
 
             let msgpack = rmp_serde::to_vec(&handle_json(&if req_body.is_empty() {
+                Json::Null
+            } else {
                 let body: Json = rmp_serde::from_slice(&req_body)?;
                 body
-            } else {
-                Json::Null
             })?)?;
             *res.body_mut() = axum::body::Body::from(msgpack);
-            res.headers_mut().append(
-                "Content-Type",
-                axum::http::HeaderValue::from_static("application/msgpack"),
-            );
 
             Ok(())
         }
         Box::pin(async move {
             let (req_meta, req_body) = req.into_parts();
             let mut res = Response::default();
+            res.headers_mut().append(
+                "Content-Type",
+                axum::http::HeaderValue::from_static("application/msgpack"),
+            ) ;
             let req_body = axum::body::to_bytes(req_body, usize::MAX).await.unwrap();
             if let Err(e) = process(&req_meta, &req_body, &mut res, handle_json).await {
                 match e {
@@ -204,6 +211,15 @@ fn gen_auth_handler(
                             .unwrap(),
                         );
                     }
+                    AgError::AttributeError(name) => {
+                        *res.status_mut() = axum::http::StatusCode::BAD_REQUEST;
+                        *res.body_mut() = axum::body::Body::from(
+                            rmp_serde::to_vec(&serde_json::json!({
+                                "error": format!("'{}' is not found", name)
+                            }))
+                            .unwrap(),
+                        );
+                    }
                     AgError::UnauthorizedError(msg) => {
                         *res.status_mut() = axum::http::StatusCode::UNAUTHORIZED;
                         *res.body_mut() = axum::body::Body::from(
@@ -215,28 +231,28 @@ fn gen_auth_handler(
                     }
                     AgError::RmpDecodeError(err) => {
                         *res.status_mut() = axum::http::StatusCode::INTERNAL_SERVER_ERROR;
-                        eprint!(
+                        eprintln!(
                             "Internal server error: {:?}\n  when {} {}",
                             err, req_meta.method, req_meta.uri
                         );
                     }
                     AgError::RmpEncodeError(err) => {
                         *res.status_mut() = axum::http::StatusCode::INTERNAL_SERVER_ERROR;
-                        eprint!(
+                        eprintln!(
                             "Internal server error: {:?}\n  when {} {}",
                             err, req_meta.method, req_meta.uri
                         );
                     }
                     AgError::SerdeJsonError(err) => {
                         *res.status_mut() = axum::http::StatusCode::INTERNAL_SERVER_ERROR;
-                        eprint!(
+                        eprintln!(
                             "Internal server error: {:?}\n  when {} {}",
                             err, req_meta.method, req_meta.uri
                         );
                     }
                     AgError::UuidError(err) => {
                         *res.status_mut() = axum::http::StatusCode::INTERNAL_SERVER_ERROR;
-                        eprint!(
+                        eprintln!(
                             "Internal server error: {:?}\n  when {} {}",
                             err, req_meta.method, req_meta.uri
                         );
@@ -270,48 +286,30 @@ async fn main() {
 
     let server = axum::Router::new();
 
-    // server.set_exception_handler(
-    //   |req: &Request, res: &Response, ep: &exception_ptr| {
-    //     try {
-    //       rethrow_exception(ep);
-    //     } catch (const error &err) {
-    //       res.status = err.code;
-    //       const auto msgpack = json::to_msgpack(json{ { "error", err.what() } });
-    //       res.set_content(string(msgpack.begin(), msgpack.end()), "application/msgpack");
-    //     } catch (const exception &err) {
-    //       res.status = 500;
-    //       log_stderr(format("Internal server error: {}\n  when {} {}", err.what(), req.method, req.path));
-    //     } catch (...) {
-    //       res.status = 500;
-    //       log_stderr(format("Unknown error\n  when {} {}", req.method, req.path));
-    //     }
-    //   }
+    // let invalid_ver_pattern = format!("((?!{}/).*)", &*API_PATH);
+    // let invalid_ver_handler = gen_auth_handler(|_| {
+    //     Err(AgError::NotFoundError(format!(
+    //         "Invalid API version. Use {}.",
+    //         &*API_PATH,
+    //     )))
+    // });
+    // let server = server.route(
+    //     &invalid_ver_pattern,
+    //     get_method(invalid_ver_handler.clone()),
     // );
-
-    let invalid_ver_pattern = format!("((?!{}/).*)", &*API_PATH);
-    let invalid_ver_handler = gen_auth_handler(|_| {
-        Err(AgError::NotFoundError(format!(
-            "Invalid API version. Use {}.",
-            &*API_PATH,
-        )))
-    });
-    let server = server.route(
-        &invalid_ver_pattern,
-        get_method(invalid_ver_handler.clone()),
-    );
-    let server = server.route(&invalid_ver_pattern, post_method(invalid_ver_handler));
+    // let server = server.route(&invalid_ver_pattern, post_method(invalid_ver_handler));
 
     let room_list = room_list_arc.clone();
     let session_list = session_list_arc.clone();
     let server = server.route(
         &format!("{}/room/create", &*API_PATH),
         post_method(gen_auth_handler(move |req| {
-            let version: String = serde_json::from_value(req.at("version"))?;
+            let version: String = serde_json::from_value(req.at("version")?)?;
             let owner = room::user_t::new(&serde_json::from_value::<String>(
-                req.at("user").at("name"),
+                req.at("user")?.at("name")?,
             )?)?;
             let owner_id = owner.id;
-            let size: usize = serde_json::from_value(req.at("size"))?;
+            let size: usize = serde_json::from_value(req.at("size")?)?;
             let room = room_list.create(&version, owner, size)?;
             let session = session_list.create(room.id, owner_id);
             return Ok(serde_json::json!({
@@ -328,12 +326,12 @@ async fn main() {
     let server = server.route(
         &format!("{}/room/join", &*API_PATH),
         post_method(gen_auth_handler(move |req| {
-            let version: String = serde_json::from_value(req.at("version"))?;
-            let room = room_list.get(&serde_json::from_value::<String>(req.at("name"))?)?;
+            let version: String = serde_json::from_value(req.at("version")?)?;
+            let room = room_list.get(&serde_json::from_value::<String>(req.at("name")?)?)?;
             let user = room::user_t::new(&serde_json::from_value::<String>(
-                req.at("user").at("name"),
+                req.at("user")?.at("name")?,
             )?)?;
-            let user_id = user.id.clone();
+            let user_id = user.id;
             room.join(version, user)?;
             let session = session_list.create(room.id, user_id);
             return Ok(serde_json::json!({
@@ -350,7 +348,7 @@ async fn main() {
     let server = server.route(
         &format!("{}/room/start", &*API_PATH),
         post_method(gen_auth_handler(move |req| {
-            let session = session_list.get(&uuid_from_json_value(req.at("session_id"))?)?;
+            let session = session_list.get(&uuid_from_json_value(req.at("session_id")?)?)?;
             let room = room_list.get_by_id(&session.room_id)?;
             if session.user_id != room.get_owner()?.id {
                 return Err(AgError::ForbiddenError(
@@ -367,7 +365,7 @@ async fn main() {
     let server = server.route(
         &format!("{}/room/sync", &*API_PATH),
         post_method(gen_auth_handler(move |req| {
-            let session = session_list.get(&uuid_from_json_value(req.at("session_id"))?)?;
+            let session = session_list.get(&uuid_from_json_value(req.at("session_id")?)?)?;
             let room = room_list.get_by_id(&session.room_id)?;
             if (time::Instant::now() - room.get_user(&session.user_id)?.get_last_time())
                 < time::Duration::from_millis(100)
@@ -378,28 +376,28 @@ async fn main() {
             }
             let mut user_reports = Vec::new();
             let mut user_actions = Vec::new();
-            for report_j in serde_json::from_value::<Vec<Json>>(req.at("reports"))? {
+            for report_j in serde_json::from_value::<Vec<Json>>(req.at("reports")?)? {
                 user_reports.push(sync::Arc::new(sync_record::event_t::new(
-                    uuid_from_json_value(report_j.at("id"))?,
+                    uuid_from_json_value(report_j.at("id")?)?,
                     session.user_id,
-                    serde_json::from_value(report_j.at("type"))?,
-                    report_j.at("event"),
+                    serde_json::from_value(report_j.at("type")?)?,
+                    report_j.at("event")?,
                 )));
             }
-            for action_j in serde_json::from_value::<Vec<Json>>(req.at("actions"))? {
+            for action_j in serde_json::from_value::<Vec<Json>>(req.at("actions")?)? {
                 user_actions.push(sync::Arc::new(sync_record::event_t::new(
-                    uuid_from_json_value(action_j.at("id"))?,
+                    uuid_from_json_value(action_j.at("id")?)?,
                     session.user_id,
-                    serde_json::from_value(action_j.at("type"))?,
-                    action_j.at("event"),
+                    serde_json::from_value(action_j.at("type")?)?,
+                    action_j.at("event")?,
                 )));
             }
 
             if session.user_id == room.get_owner()?.id {
-                room.update_info(req.at("room_info"));
+                room.update_info(req.at("room_info")?);
             }
             let records = room.sync(
-                &session.user_id,
+                session.user_id,
                 &user_reports,
                 &user_actions,
                 time::Duration::from_millis(200),
