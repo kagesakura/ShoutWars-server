@@ -75,14 +75,8 @@ fn log_stderr(msg: &str) {
 pub enum AgError {
     SerdeJsonError(serde_json::Error),
     UuidError(uuid::Error),
-    // NotFoundError(String),
-    // ForbiddenError(String),
-    // TooManyRequestsError(&'static str),
     RmpEncodeError(rmp_serde::encode::Error),
     RmpDecodeError(rmp_serde::decode::Error),
-    // BadRequestError(String),
-    // UnauthorizedError(&'static str),
-    // AttributeError(String)
     ErrorWithHttpStatus(axum::http::StatusCode, borrow::Cow<'static, str>),
 }
 
