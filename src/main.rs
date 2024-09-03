@@ -334,7 +334,7 @@ async fn main() {
                 req.at("user").at("name"),
             )?)?;
             let user_id = user.id.clone();
-            room.join(version, user);
+            room.join(version, user)?;
             let session = session_list.create(room.id, user_id);
             return Ok(serde_json::json!({
               "session_id": json_value_from_uuid(session.id)?,
@@ -357,7 +357,7 @@ async fn main() {
                     "Only owner can start the game.".to_owned(),
                 ));
             }
-            room.start_game();
+            room.start_game()?;
             return Ok(serde_json::json!({}));
         })),
     );

@@ -30,7 +30,7 @@ impl user_t {
             last_sync_id: uuid::Uuid::nil(),
             last_time: time::Instant::now(),
         };
-        this.set_name(name);
+        this.set_name(name)?;
         Ok(this)
     }
     pub fn get_name(&self) -> String {
@@ -243,7 +243,7 @@ impl room_t {
     }
 
     pub fn start_game(&self) -> Result<(), crate::AgError> {
-        let lock = self.inner.read();
+        let mut lock = self.inner.write();
         if !lock.in_lobby {
             return Err(crate::AgError::ForbiddenError(
                 "Game already started.".to_owned(),
@@ -312,7 +312,7 @@ impl room_t {
             ));
         }
 
-        record.add_events(&user_id, reports, actions);
+        record.add_events(&user_id, reports, actions)?;
 
         // wait for users who didn't skip last sync
         if record.get_max_phase() <= crate::phase_t::WAITING && lock.sync_records.len() > 1 {
