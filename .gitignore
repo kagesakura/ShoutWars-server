@@ -50,3 +50,6 @@ _deps
 ### Custom
 
 /cmake-build-debug/
+
+### Rust build tardir
+/target
