@@ -58,13 +58,13 @@ impl room_list_t {
         }
         let name = loop {
             let name = format!(
-                concat!("{:0", "6", "}"),
+                "{}",
                 DIST.with_borrow(|dist| GEN_RAND.with_borrow_mut(|gen_rand| {
                     rand::distributions::Distribution::sample(dist, gen_rand)
                 }))
             );
             let mut buf = String::new();
-            for _ in 0..(name.len() - (Self::NAME_LENGTH as usize)) {
+            for _ in 0..(Self::NAME_LENGTH as usize - name.len()) {
                 buf.push('0');
             }
             buf.push_str(&name);
