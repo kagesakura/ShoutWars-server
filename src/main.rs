@@ -37,7 +37,12 @@ mod dummy_at_method {
     }
     impl Dummy for &serde_json::Value {
         fn at(&self, p: &str) -> Result<serde_json::Value, crate::AgError> {
-            self.get(p).cloned().ok_or_else(|| crate::AgError::bad_request_error(format!("The JSON's property '{}' is not found", p)))
+            self.get(p).cloned().ok_or_else(|| {
+                crate::AgError::bad_request_error(format!(
+                    "The JSON's property '{}' is not found",
+                    p
+                ))
+            })
         }
     }
 }
@@ -184,7 +189,7 @@ fn gen_auth_handler(
             res.headers_mut().append(
                 "Content-Type",
                 axum::http::HeaderValue::from_static("application/msgpack"),
-            ) ;
+            );
             let req_body = axum::body::to_bytes(req_body, usize::MAX).await.unwrap();
             if let Err(e) = process(&req_meta, &req_body, &mut res, handle_json).await {
                 match e {
@@ -319,9 +324,7 @@ async fn main() {
             let session = session_list.get(&uuid_from_json_value(req.at("session_id")?)?)?;
             let room = room_list.get_by_id(&session.room_id)?;
             if session.user_id != room.get_owner()?.id {
-                return Err(AgError::forbidden_error(
-                    "Only owner can start the game.".to_owned(),
-                ));
+                return Err(AgError::forbidden_error("Only owner can start the game."));
             }
             room.start_game()?;
             return Ok(serde_json::json!({}));

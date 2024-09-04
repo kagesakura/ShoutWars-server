@@ -40,9 +40,7 @@ impl session_list_t {
         sessions.insert(session.id, session.clone());
         (self.log_info)(&format!(
             "Session created: {} (room_id={}, user_id={})",
-            session.id,
-            room_id,
-            user_id
+            session.id, room_id, user_id
         ));
         session
     }

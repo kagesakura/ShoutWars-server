@@ -155,9 +155,7 @@ impl room_t {
             ..
         } = &mut *self.inner.write();
         if !*in_lobby {
-            return Err(crate::AgError::forbidden_error(
-                "Game already started.".to_owned(),
-            ));
+            return Err(crate::AgError::forbidden_error("Game already started."));
         }
         if users.len() >= self.size {
             return Err(crate::AgError::forbidden_error(format!(
@@ -166,9 +164,7 @@ impl room_t {
             )));
         }
         if users.contains_key(&user.id) {
-            return Err(crate::AgError::forbidden_error(
-                "User already in the room.".to_owned(),
-            ));
+            return Err(crate::AgError::forbidden_error("User already in the room."));
         }
         let user_id = user.id;
         users.insert(user.id, user);
@@ -186,7 +182,7 @@ impl room_t {
         lock.users
             .get(id)
             .cloned()
-            .ok_or_else(|| crate::AgError::not_found_error("User not found.".to_owned()))
+            .ok_or_else(|| crate::AgError::not_found_error("User not found."))
     }
 
     pub fn has_user(&self, id: &uuid::Uuid) -> bool {
@@ -232,7 +228,7 @@ impl room_t {
     pub fn get_owner(&self) -> Result<user_t, crate::AgError> {
         let lock = self.inner.read();
         if lock.users.is_empty() {
-            return Err(crate::AgError::not_found_error("Room is empty.".to_owned()));
+            return Err(crate::AgError::not_found_error("Room is empty."));
         }
         return Ok(lock.users.first_key_value().unwrap().1.clone());
     }
@@ -245,13 +241,11 @@ impl room_t {
     pub fn start_game(&self) -> Result<(), crate::AgError> {
         let mut lock = self.inner.write();
         if !lock.in_lobby {
-            return Err(crate::AgError::forbidden_error(
-                "Game already started.".to_owned(),
-            ));
+            return Err(crate::AgError::forbidden_error("Game already started."));
         }
         if lock.users.len() < 2 {
             return Err(crate::AgError::forbidden_error(
-                "Not enough players to start the game.".to_owned(),
+                "Not enough players to start the game.",
             ));
         }
         lock.in_lobby = false;
@@ -296,20 +290,14 @@ impl room_t {
         let mut lock = self.inner.write();
 
         if !lock.users.contains_key(&user_id) {
-            return Err(crate::AgError::forbidden_error(
-                "User not in the room.".to_owned(),
-            ));
+            return Err(crate::AgError::forbidden_error("User not in the room."));
         }
         let record = lock.sync_records.last_key_value().unwrap().1.clone();
         if record.get_phase(user_id) > crate::phase_t::CREATED {
-            return Err(crate::AgError::forbidden_error(
-                "User already synced.".to_owned(),
-            ));
+            return Err(crate::AgError::forbidden_error("User already synced."));
         }
         if record.get_max_phase() >= crate::phase_t::SYNCED {
-            return Err(crate::AgError::forbidden_error(
-                "Room already synced.".to_owned(),
-            ));
+            return Err(crate::AgError::forbidden_error("Room already synced."));
         }
 
         record.add_events(user_id, reports, actions)?;
@@ -362,8 +350,7 @@ impl room_t {
             return record.get_phase(id) >= crate::phase_t::SYNCED;
         }) {
             let next_record = sync::Arc::new(crate::sync_record_t::new());
-            lock.sync_records
-                .insert(next_record.id, next_record);
+            lock.sync_records.insert(next_record.id, next_record);
         }
 
         let user = lock.users.get_mut(&user_id).unwrap();

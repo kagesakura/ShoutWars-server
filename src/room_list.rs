@@ -98,7 +98,7 @@ impl room_list_t {
         lock.rooms
             .get(id)
             .cloned()
-            .ok_or_else(|| crate::AgError::not_found_error("Room not found.".to_owned()))
+            .ok_or_else(|| crate::AgError::not_found_error("Room not found."))
     }
 
     pub fn get(&self, name: &str) -> Result<sync::Arc<crate::room_t>, crate::AgError> {
@@ -107,7 +107,7 @@ impl room_list_t {
             .get(name)
             .and_then(|id| lock.rooms.get(id))
             .cloned()
-            .ok_or_else(|| crate::AgError::not_found_error("Room not found.".to_owned()))
+            .ok_or_else(|| crate::AgError::not_found_error("Room not found."))
     }
 
     pub fn exists_by_id(&self, id: &uuid::Uuid) -> bool {

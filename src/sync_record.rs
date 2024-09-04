@@ -73,23 +73,17 @@ impl sync_record_t {
     ) -> Result<(), crate::AgError> {
         let mut lock = self.inner.write();
         if *lock.users_phase.entry(from).or_insert(phase_t::CREATED) > phase_t::CREATED {
-            return Err(crate::AgError::bad_request_error(
-                "Record already synced.".to_owned(),
-            ));
+            return Err(crate::AgError::bad_request_error("Record already synced."));
         }
         for report in new_reports {
             if report.from != from {
-                return Err(crate::AgError::bad_request_error(
-                    "Invalid report from.".to_owned(),
-                ));
+                return Err(crate::AgError::bad_request_error("Invalid report from."));
             }
             lock.reports.insert(report.id, report.clone());
         }
         for action in new_actions {
             if action.from != from {
-                return Err(crate::AgError::bad_request_error(
-                    "Invalid action from.".to_owned(),
-                ));
+                return Err(crate::AgError::bad_request_error("Invalid action from."));
             }
             lock.reports.insert(action.id, action.clone());
         }
