@@ -132,7 +132,8 @@ impl From<rmp_serde::decode::Error> for AgError {
 
 fn uuid_from_json_value(val: serde_json::Value) -> Result<uuid::Uuid, AgError> {
     let s: String = serde_json::from_value(val)?;
-    Ok(uuid::Uuid::parse_str(&s).map_err(|e| AgError::bad_request_error(format!("Invalid UUID: {:?}", e)))?)
+    Ok(uuid::Uuid::parse_str(&s)
+        .map_err(|e| AgError::bad_request_error(format!("Invalid UUID: {:?}", e)))?)
 }
 
 fn json_value_from_uuid(uuid: uuid::Uuid) -> Result<serde_json::Value, AgError> {
@@ -148,7 +149,8 @@ fn json_value_from_uuid(uuid: uuid::Uuid) -> Result<serde_json::Value, AgError> 
  */
 fn gen_auth_handler(
     handle_json: impl Fn(&Json) -> Result<Json, AgError> + Send + Sync + 'static,
-) -> impl Fn(Request) -> pin::Pin<Box<dyn core::future::Future<Output = Response> + Send>> + 'static
+) -> impl Fn(Request) -> pin::Pin<Box<dyn core::future::Future<Output = Response> + Send>>
+       + 'static
        + Clone
        + Send
        + 'static {
@@ -272,55 +274,61 @@ async fn main() {
 
     let server = server.route(
         &format!("{}/room/create", &*API_PATH),
-        post_method(gen_auth_handler(clone_capture!([room_list, session_list] move |req| {
-            let version: String = serde_json::from_value(req.at("version")?)?;
-            let owner = room::user_t::new(&serde_json::from_value::<String>(
-                req.at("user")?.at("name")?,
-            )?)?;
-            let owner_id = owner.id;
-            let size: usize = serde_json::from_value(req.at("size")?)?;
-            let room = room_list.create(&version, owner, size)?;
-            let session = session_list.create(room.id, owner_id);
-            return Ok(serde_json::json!({
-                "session_id": json_value_from_uuid(session.id)?,
-                "user_id": json_value_from_uuid(owner_id)?,
-                "id": json_value_from_uuid(room.id)?,
-                "name": room.name
-            }));
-        }))),
+        post_method(gen_auth_handler(
+            clone_capture!([room_list, session_list] move |req| {
+                let version: String = serde_json::from_value(req.at("version")?)?;
+                let owner = room::user_t::new(&serde_json::from_value::<String>(
+                    req.at("user")?.at("name")?,
+                )?)?;
+                let owner_id = owner.id;
+                let size: usize = serde_json::from_value(req.at("size")?)?;
+                let room = room_list.create(&version, owner, size)?;
+                let session = session_list.create(room.id, owner_id);
+                return Ok(serde_json::json!({
+                    "session_id": json_value_from_uuid(session.id)?,
+                    "user_id": json_value_from_uuid(owner_id)?,
+                    "id": json_value_from_uuid(room.id)?,
+                    "name": room.name
+                }));
+            }),
+        )),
     );
 
     let server = server.route(
         &format!("{}/room/join", &*API_PATH),
-        post_method(gen_auth_handler(clone_capture!([room_list, session_list] move |req| {
-            let version: String = serde_json::from_value(req.at("version")?)?;
-            let room = room_list.get(&serde_json::from_value::<String>(req.at("name")?)?)?;
-            let user = room::user_t::new(&serde_json::from_value::<String>(
-                req.at("user")?.at("name")?,
-            )?)?;
-            let user_id = user.id;
-            room.join(version, user)?;
-            let session = session_list.create(room.id, user_id);
-            return Ok(serde_json::json!({
-              "session_id": json_value_from_uuid(session.id)?,
-              "id": json_value_from_uuid(room.id)?,
-              "user_id": json_value_from_uuid(user_id)?,
-              "room_info": room.get_info()
-            }));
-        }))),
+        post_method(gen_auth_handler(
+            clone_capture!([room_list, session_list] move |req| {
+                let version: String = serde_json::from_value(req.at("version")?)?;
+                let room = room_list.get(&serde_json::from_value::<String>(req.at("name")?)?)?;
+                let user = room::user_t::new(&serde_json::from_value::<String>(
+                    req.at("user")?.at("name")?,
+                )?)?;
+                let user_id = user.id;
+                room.join(version, user)?;
+                let session = session_list.create(room.id, user_id);
+                return Ok(serde_json::json!({
+                  "session_id": json_value_from_uuid(session.id)?,
+                  "id": json_value_from_uuid(room.id)?,
+                  "user_id": json_value_from_uuid(user_id)?,
+                  "room_info": room.get_info()
+                }));
+            }),
+        )),
     );
 
     let server = server.route(
         &format!("{}/room/start", &*API_PATH),
-        post_method(gen_auth_handler(clone_capture!([room_list, session_list] move |req| {
-            let session = session_list.get(&uuid_from_json_value(req.at("session_id")?)?)?;
-            let room = room_list.get_by_id(&session.room_id)?;
-            if session.user_id != room.get_owner()?.id {
-                return Err(AgError::forbidden_error("Only owner can start the game."));
-            }
-            room.start_game()?;
-            return Ok(serde_json::json!({}));
-        }))),
+        post_method(gen_auth_handler(
+            clone_capture!([room_list, session_list] move |req| {
+                let session = session_list.get(&uuid_from_json_value(req.at("session_id")?)?)?;
+                let room = room_list.get_by_id(&session.room_id)?;
+                if session.user_id != room.get_owner()?.id {
+                    return Err(AgError::forbidden_error("Only owner can start the game."));
+                }
+                room.start_game()?;
+                return Ok(serde_json::json!({}));
+            }),
+        )),
     );
 
     let server = server.route(
