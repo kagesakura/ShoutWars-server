@@ -262,7 +262,7 @@ async fn main() {
 
     let server = server.layer(axum::middleware::from_fn(move |request: Request, next: axum::middleware::Next|
         clone_capture!([invalid_ver_handler] async move {
-            if matches!(request.method(), &axum::http::Method::GET | &axum::http::Method::POST) && !request.uri().path().starts_with("/v2/") {
+            if matches!(request.method(), &axum::http::Method::GET | &axum::http::Method::POST) && !request.uri().path().starts_with(&format!("{}/", &*API_PATH)) {
                 invalid_ver_handler(request).await
             } else {
                 next.run(request).await
