@@ -253,18 +253,22 @@ async fn main() {
 
     let server = axum::Router::new();
 
-    // let invalid_ver_pattern = format!("((?!{}/).*)", &*API_PATH);
-    // let invalid_ver_handler = gen_auth_handler(|_| {
-    //     Err(AgError::NotFoundError(format!(
-    //         "Invalid API version. Use {}.",
-    //         &*API_PATH,
-    //     )))
-    // });
-    // let server = server.route(
-    //     &invalid_ver_pattern,
-    //     get_method(invalid_ver_handler.clone()),
-    // );
-    // let server = server.route(&invalid_ver_pattern, post_method(invalid_ver_handler));
+    let invalid_ver_handler = sync::Arc::new(gen_auth_handler(|_| {
+        Err(AgError::not_found_error(format!(
+            "Invalid API version. Use {}.",
+            &*API_PATH,
+        )))
+    }));
+
+    let server = server.layer(axum::middleware::from_fn(move |request: Request, next: axum::middleware::Next|
+        clone_capture!([invalid_ver_handler] async move {
+            if matches!(request.method(), &axum::http::Method::GET | &axum::http::Method::POST) && !request.uri().path().starts_with("/v2/") {
+                invalid_ver_handler(request).await
+            } else {
+                next.run(request).await
+            }
+        })
+    ));
 
     let server = server.route(
         &format!("{}/room/create", &*API_PATH),
