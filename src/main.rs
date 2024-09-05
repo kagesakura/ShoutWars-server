@@ -22,6 +22,14 @@ macro_rules! lazy {
         $(static $name : ::std::sync::LazyLock<$typ> = ::std::sync::LazyLock::new(|| $init);)+
     };
 }
+macro_rules! clone_capture {
+    ([$($variables:ident),+] $closure:expr) => {
+        {
+            $(let $variables = $variables.clone();)+
+            $closure
+        }
+    };
+}
 fn stoul(v: String) -> u64 {
     v.parse().unwrap()
 }
@@ -79,7 +87,6 @@ fn log_stderr(msg: &str) {
 #[derive(Debug)]
 pub enum AgError {
     SerdeJsonError(serde_json::Error),
-    UuidError(uuid::Error),
     RmpEncodeError(rmp_serde::encode::Error),
     RmpDecodeError(rmp_serde::decode::Error),
     ErrorWithHttpStatus(axum::http::StatusCode, borrow::Cow<'static, str>),
@@ -109,12 +116,6 @@ impl From<serde_json::Error> for AgError {
     }
 }
 
-impl From<uuid::Error> for AgError {
-    fn from(value: uuid::Error) -> Self {
-        Self::UuidError(value)
-    }
-}
-
 impl From<rmp_serde::encode::Error> for AgError {
     fn from(value: rmp_serde::encode::Error) -> Self {
         Self::RmpEncodeError(value)
@@ -131,7 +132,7 @@ impl From<rmp_serde::decode::Error> for AgError {
 
 fn uuid_from_json_value(val: serde_json::Value) -> Result<uuid::Uuid, AgError> {
     let s: String = serde_json::from_value(val)?;
-    Ok(uuid::Uuid::parse_str(&s)?)
+    Ok(uuid::Uuid::parse_str(&s).map_err(|e| AgError::bad_request_error(format!("Invalid UUID: {:?}", e)))?)
 }
 
 fn json_value_from_uuid(uuid: uuid::Uuid) -> Result<serde_json::Value, AgError> {
@@ -147,7 +148,7 @@ fn json_value_from_uuid(uuid: uuid::Uuid) -> Result<serde_json::Value, AgError> 
  */
 fn gen_auth_handler(
     handle_json: impl Fn(&Json) -> Result<Json, AgError> + Send + Sync + 'static,
-) -> impl Fn(Request) -> pin::Pin<Box<dyn core::future::Future<Output = Response> + Send>>
+) -> impl Fn(Request) -> pin::Pin<Box<dyn core::future::Future<Output = Response> + Send>> + 'static
        + Clone
        + Send
        + 'static {
@@ -223,13 +224,6 @@ fn gen_auth_handler(
                             err, req_meta.method, req_meta.uri
                         );
                     }
-                    AgError::UuidError(err) => {
-                        *res.status_mut() = axum::http::StatusCode::INTERNAL_SERVER_ERROR;
-                        eprintln!(
-                            "Internal server error: {:?}\n  when {} {}",
-                            err, req_meta.method, req_meta.uri
-                        );
-                    }
                 }
             }
             return res;
@@ -245,11 +239,11 @@ async fn main() {
     println!("==========================================================");
     println!("ShoutWars backend server v{} starting...", API_VER);
 
-    let session_list_arc = sync::Arc::new(session::session_list_t::new(
+    let session_list = sync::Arc::new(session::session_list_t::new(
         sync::Arc::new(log_stderr),
         sync::Arc::new(log_stdout),
     ));
-    let room_list_arc = sync::Arc::new(room_list::room_list_t::new(
+    let room_list = sync::Arc::new(room_list::room_list_t::new(
         (*ROOM_LIMIT) as usize,
         LOBBY_LIFETIME.to_owned(),
         GAME_LIFETIME.to_owned(),
@@ -272,11 +266,9 @@ async fn main() {
     // );
     // let server = server.route(&invalid_ver_pattern, post_method(invalid_ver_handler));
 
-    let room_list = room_list_arc.clone();
-    let session_list = session_list_arc.clone();
     let server = server.route(
         &format!("{}/room/create", &*API_PATH),
-        post_method(gen_auth_handler(move |req| {
+        post_method(gen_auth_handler(clone_capture!([room_list, session_list] move |req| {
             let version: String = serde_json::from_value(req.at("version")?)?;
             let owner = room::user_t::new(&serde_json::from_value::<String>(
                 req.at("user")?.at("name")?,
@@ -291,14 +283,12 @@ async fn main() {
                 "id": json_value_from_uuid(room.id)?,
                 "name": room.name
             }));
-        })),
+        }))),
     );
 
-    let room_list = room_list_arc.clone();
-    let session_list = session_list_arc.clone();
     let server = server.route(
         &format!("{}/room/join", &*API_PATH),
-        post_method(gen_auth_handler(move |req| {
+        post_method(gen_auth_handler(clone_capture!([room_list, session_list] move |req| {
             let version: String = serde_json::from_value(req.at("version")?)?;
             let room = room_list.get(&serde_json::from_value::<String>(req.at("name")?)?)?;
             let user = room::user_t::new(&serde_json::from_value::<String>(
@@ -313,14 +303,12 @@ async fn main() {
               "user_id": json_value_from_uuid(user_id)?,
               "room_info": room.get_info()
             }));
-        })),
+        }))),
     );
 
-    let room_list = room_list_arc.clone();
-    let session_list = session_list_arc.clone();
     let server = server.route(
         &format!("{}/room/start", &*API_PATH),
-        post_method(gen_auth_handler(move |req| {
+        post_method(gen_auth_handler(clone_capture!([room_list, session_list] move |req| {
             let session = session_list.get(&uuid_from_json_value(req.at("session_id")?)?)?;
             let room = room_list.get_by_id(&session.room_id)?;
             if session.user_id != room.get_owner()?.id {
@@ -328,14 +316,12 @@ async fn main() {
             }
             room.start_game()?;
             return Ok(serde_json::json!({}));
-        })),
+        }))),
     );
 
-    let room_list = room_list_arc.clone();
-    let session_list = session_list_arc.clone();
     let server = server.route(
         &format!("{}/room/sync", &*API_PATH),
-        post_method(gen_auth_handler(move |req| {
+        post_method(gen_auth_handler(clone_capture!([room_list, session_list] move |req| {
             let session = session_list.get(&uuid_from_json_value(req.at("session_id")?)?)?;
             let room = room_list.get_by_id(&session.room_id)?;
             if (time::Instant::now() - room.get_user(&session.user_id)?.get_last_time())
@@ -400,35 +386,33 @@ async fn main() {
               "actions": actions,
               "room_users": room.get_users(),
             }));
-        })),
+        }))),
     );
 
-    let room_list = room_list_arc.clone();
     let server = server.route(
         &format!("{}/status", &*API_PATH),
-        get_method(gen_auth_handler(move |_| {
+        get_method(gen_auth_handler(clone_capture!([room_list] move |_| {
             return Ok(serde_json::json!({
                 "room_count": room_list.count(),
                 "room_limit": room_list.get_limit()
             }));
-        })),
+        }))),
     );
 
-    let running_arc = sync::Arc::new(sync::atomic::AtomicBool::new(true));
-    let running = running_arc.clone();
-    let cleaner_thread = tokio::spawn(async move {
+    let running = sync::Arc::new(sync::atomic::AtomicBool::new(true));
+    let cleaner_thread = tokio::spawn(clone_capture!([running] async move {
         while running.load(sync::atomic::Ordering::SeqCst) {
-            room_list_arc.clean(EXPIRE_TIMEOUT);
-            session_list_arc.clean(&|session: &session::session_t| {
-                return !room_list_arc.exists_by_id(&session.room_id)
-                    || !room_list_arc
+            room_list.clean(EXPIRE_TIMEOUT);
+            session_list.clean(&|session: &session::session_t| {
+                return !room_list.exists_by_id(&session.room_id)
+                    || !room_list
                         .get_by_id(&session.room_id)
                         .unwrap()
                         .has_user(&session.user_id);
             });
             tokio::time::sleep(CLEANER_INTERVAL).await;
         }
-    });
+    }));
 
     println!("");
     println!("Server started at http://localhost:{}", &*PORT);
@@ -441,7 +425,7 @@ async fn main() {
         .unwrap();
     axum::serve(listener, server).await.unwrap();
 
-    running_arc.store(false, sync::atomic::Ordering::SeqCst);
+    running.store(false, sync::atomic::Ordering::SeqCst);
     cleaner_thread.await.unwrap();
 
     println!("");
